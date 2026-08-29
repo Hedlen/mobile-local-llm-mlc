@@ -76,6 +76,18 @@ fun GameView(navController: NavController, appViewModel: AppViewModel, activity:
                     }) { Text("复盘讲故事") }
                 }
             }
+            item {
+                val latest = chat.messages.lastOrNull { it.role == MessageRole.Assistant }?.text.orEmpty()
+                if (latest.isNotBlank() || chat.report.value.isNotBlank()) {
+                    Card {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("本地模型反馈", style = MaterialTheme.typography.titleMedium)
+                            if (latest.isNotBlank()) Text(latest)
+                            if (chat.report.value.isNotBlank()) Text(chat.report.value, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
             item { Text("提示：棋盘规则为 MVP 占位，重点验证端侧模型的建议、复盘和个性化表达链路。") }
         }
     }
