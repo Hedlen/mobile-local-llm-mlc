@@ -1,0 +1,179 @@
+diff --git a/android/mlc4j/src/cpp/tvm_runtime.h b/android/mlc4j/src/cpp/tvm_runtime.h
+index 26051d1..b9dfa4d 100644
+--- a/android/mlc4j/src/cpp/tvm_runtime.h
++++ b/android/mlc4j/src/cpp/tvm_runtime.h
+@@ -6,6 +6,7 @@
+ 
+ #include <ffi/backtrace.cc>
+ #include <ffi/container.cc>
++#include <ffi/custom_allocator.cc>
+ #include <ffi/dtype.cc>
+ #include <ffi/error.cc>
+ #include <ffi/extra/env_c_api.cc>
+@@ -17,6 +18,7 @@
+ #include <ffi/extra/library_module_system_lib.cc>
+ #include <ffi/extra/module.cc>
+ #include <ffi/function.cc>
++#include <ffi/init_once.cc>
+ #include <ffi/object.cc>
+ #include <runtime/cpu_device_api.cc>
+ #include <runtime/device_api.cc>
+@@ -24,12 +26,9 @@
+ #include <runtime/logging.cc>
+ #include <runtime/memory/memory_manager.cc>
+ #include <runtime/module.cc>
+-#include <runtime/nvtx.cc>
+-#include <runtime/opencl/opencl_device_api.cc>
+-#include <runtime/opencl/opencl_module.cc>
+-#include <runtime/opencl/opencl_wrapper/opencl_wrapper.cc>
+-#include <runtime/profiling.cc>
+-#include <runtime/source_utils.cc>
++#include <backend/opencl/runtime/opencl_device_api.cc>
++#include <backend/opencl/runtime/opencl_module.cc>
++#include <backend/opencl/runtime/opencl_wrapper/opencl_wrapper.cc>
+ #include <runtime/tensor.cc>
+ #include <runtime/thread_pool.cc>
+ #include <runtime/threading_backend.cc>
+@@ -53,7 +52,7 @@ namespace detail {
+ [[noreturn]] void LogFatalImpl(const std::string& file, int lineno, const std::string& message) {
+   std::string m = file + ":" + std::to_string(lineno) + ": " + message;
+   __android_log_write(ANDROID_LOG_FATAL, "TVM_RUNTIME", m.c_str());
+-  throw InternalError(file, lineno, message);
++  TVM_FFI_THROW(InternalError) << m;
+ }
+ void LogMessageImpl(const std::string& file, int lineno, int level, const std::string& message) {
+   std::string m = file + ":" + std::to_string(lineno) + ": " + message;
+diff --git a/android/mlc4j/src/main/java/ai/mlc/mlcllm/JSONFFIEngine.java b/android/mlc4j/src/main/java/ai/mlc/mlcllm/JSONFFIEngine.java
+index ad95dd2..55f005a 100644
+--- a/android/mlc4j/src/main/java/ai/mlc/mlcllm/JSONFFIEngine.java
++++ b/android/mlc4j/src/main/java/ai/mlc/mlcllm/JSONFFIEngine.java
+@@ -60,6 +60,10 @@ public class JSONFFIEngine {
+         chatCompletionFunc.pushArg(requestJSONStr).pushArg(requestId).invoke();
+     }
+ 
++    public void abort(String requestId) {
++        abortFunc.pushArg(requestId).invoke();
++    }
++
+     public void runBackgroundLoop() {
+         runBackgroundLoopFunc.invoke();
+     }
+diff --git a/android/mlc4j/src/main/java/ai/mlc/mlcllm/MLCEngine.kt b/android/mlc4j/src/main/java/ai/mlc/mlcllm/MLCEngine.kt
+index be4656b..c63ba7d 100644
+--- a/android/mlc4j/src/main/java/ai/mlc/mlcllm/MLCEngine.kt
++++ b/android/mlc4j/src/main/java/ai/mlc/mlcllm/MLCEngine.kt
+@@ -71,6 +71,10 @@ class MLCEngine {
+     fun unload() {
+         jsonFFIEngine.unload()
+     }
++
++    fun abortAll() {
++        state.abortAll(jsonFFIEngine)
++    }
+ }
+ 
+ data class RequestState(
+@@ -83,6 +87,15 @@ class EngineState {
+     private val logger = Logger.getLogger(EngineState::class.java.name)
+     private val requestStateMap = mutableMapOf<String, RequestState>()
+ 
++    @Synchronized
++    fun abortAll(jsonFFIEngine: JSONFFIEngine) {
++        requestStateMap.forEach { (requestId, requestState) ->
++            jsonFFIEngine.abort(requestId)
++            requestState.continuation.close()
++        }
++        requestStateMap.clear()
++    }
++
+     suspend fun chatCompletion(
+         jsonFFIEngine: JSONFFIEngine,
+         request: ChatCompletionRequest
+diff --git a/python/mlc_llm/__init__.py b/python/mlc_llm/__init__.py
+index ee7da3a..13ee80a 100644
+--- a/python/mlc_llm/__init__.py
++++ b/python/mlc_llm/__init__.py
+@@ -3,11 +3,15 @@
+ MLC Chat is the app runtime of MLC LLM.
+ """
+ 
++import os
++
+ from tvm import register_global_func
+ 
+-from . import protocol, serve
+ from .libinfo import __version__
+-from .serve import AsyncMLCEngine, MLCEngine
++
++if os.environ.get("SKIP_LOADING_MLCLLM_SO", "0") == "0":
++    from . import protocol, serve
++    from .serve import AsyncMLCEngine, MLCEngine
+ 
+ 
+ @register_global_func("runtime.disco.create_socket_session_local_workers", override=True)
+diff --git a/python/mlc_llm/compiler_pass/lift_global_buffer_alloc.py b/python/mlc_llm/compiler_pass/lift_global_buffer_alloc.py
+index 20985da..931cf1e 100644
+--- a/python/mlc_llm/compiler_pass/lift_global_buffer_alloc.py
++++ b/python/mlc_llm/compiler_pass/lift_global_buffer_alloc.py
+@@ -100,7 +100,7 @@ def remove_global_buf_alloc(
+     alloc_buffers = []
+ 
+     insertion_point = len(params)
+-    while not tirx.is_buffer_var(params[insertion_point - 1]):
++    while not isinstance(params[insertion_point - 1].ty, tvm.ir.PointerType):
+         insertion_point -= 1
+         assert insertion_point >= 1
+ 
+diff --git a/python/mlc_llm/compiler_pass/low_batch_specialization.py b/python/mlc_llm/compiler_pass/low_batch_specialization.py
+index f543027..f340b16 100644
+--- a/python/mlc_llm/compiler_pass/low_batch_specialization.py
++++ b/python/mlc_llm/compiler_pass/low_batch_specialization.py
+@@ -17,6 +17,12 @@ class LowBatchGemvSpecialize:
+         _ctx: tvm.transform.PassContext,
+     ) -> IRModule:
+         """IRModule-level transformation"""
++        # The pinned TVM revision still represents PrimFunc buffers through
++        # buffer_map, while this pass expects the newer typed-buffer parameter
++        # API. Keep the general Android schedule enabled and skip only this
++        # optional low-batch GEMV specialization until both revisions converge.
++        return mod
++
+         for g_var, func in mod.functions_items():
+             if isinstance(func, tirx.PrimFunc):
+                 low_batch_range = [2, 8]
+@@ -34,7 +40,8 @@ class LowBatchGemvSpecialize:
+                     for low_batch_func in low_batch_funcs
+                 ):
+                     continue
+-                buffers = [param for param in func.params if tirx.is_buffer_var(param)]
++                # Compatibility with TVM 0.26.dev246, before typed buffer parameters.
++                buffers = func.buffer_map.values()
+                 shapes = [buffer.shape for buffer in buffers]
+                 symbolic_vars = set(
+                     expr for shape in shapes for expr in shape if isinstance(expr, tirx.Var)
+diff --git a/python/mlc_llm/interface/package.py b/python/mlc_llm/interface/package.py
+index 31909bd..391142a 100644
+--- a/python/mlc_llm/interface/package.py
++++ b/python/mlc_llm/interface/package.py
+@@ -110,7 +110,8 @@ def build_model_library(
+         app_config_model_entry["model_lib"] = model_lib
+ 
+         # - Bundle weight
+-        if is_local_model and not bundle_weight:
++        remote_model_url = os.environ.get("MLC_REMOTE_MODEL_URL")
++        if is_local_model and not bundle_weight and remote_model_url is None:
+             raise ValueError(
+                 f'Model "{model}" in "model_list" is a local path.'
+                 f'Please set \'"bundle_weight": true\' in the entry of model "{model}".'
+@@ -140,7 +141,10 @@ def build_model_library(
+         if bundle_weight and device in ["iphone", "macabi"]:
+             app_config_model_entry["model_path"] = model_id
+         else:
+-            app_config_model_entry["model_url"] = model.replace("HF://", "https://huggingface.co/")
++            app_model_url = remote_model_url if is_local_model else model
++            app_config_model_entry["model_url"] = app_model_url.replace(
++                "HF://", "https://huggingface.co/"
++            )
+ 
+         # - estimated_vram_bytes
+         app_config_model_entry["estimated_vram_bytes"] = estimated_vram_bytes

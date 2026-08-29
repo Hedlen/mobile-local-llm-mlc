@@ -1,0 +1,18 @@
+{
+    "device": "android",
+    "model_list": [
+        {
+      "model": "HF://mlc-ai/Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
+            "model_id": "local/qwen2.5-0.5b-instruct@1",
+            "estimated_vram_bytes": 1200000000,
+            "model_lib": "qwen2_q4f16_1_ec234c98ba1f1f6d014a60148428520a",
+            "overrides": {
+                "prefill_chunk_size": 64,
+                "context_window_size": 2048
+            }
+        }
+    ],
+    "model_lib_path_for_prepare_libs": {
+        "qwen2_q4f16_1_ec234c98ba1f1f6d014a60148428520a": "../.tooling/model-libs/qwen2.5-0.5b-q4f16_1-android.tar"
+    }
+}

@@ -1,0 +1,32 @@
+diff --git a/cmake/modules/Logging.cmake b/cmake/modules/Logging.cmake
+index 09bb094..21cfe37 100644
+--- a/cmake/modules/Logging.cmake
++++ b/cmake/modules/Logging.cmake
+@@ -21,9 +21,9 @@ include(FindPackageHandleStandardArgs)
+ 
+ if(USE_CUSTOM_LOGGING)
+   # Set and propagate TVM_LOG_CUSTOMIZE flag is custom logging has been requested
+-  target_compile_definitions(tvm_objs PUBLIC TVM_LOG_CUSTOMIZE=1)
+-  target_compile_definitions(tvm_runtime_objs PUBLIC TVM_LOG_CUSTOMIZE=1)
+-  target_compile_definitions(tvm_libinfo_objs PUBLIC TVM_LOG_CUSTOMIZE=1)
+-  target_compile_definitions(tvm_compiler PUBLIC TVM_LOG_CUSTOMIZE=1)
+-  target_compile_definitions(tvm_runtime PUBLIC TVM_LOG_CUSTOMIZE=1)
++  foreach(logging_target tvm_objs tvm_runtime_objs tvm_libinfo_objs tvm_compiler tvm_runtime)
++    if(TARGET ${logging_target})
++      target_compile_definitions(${logging_target} PUBLIC TVM_LOG_CUSTOMIZE=1)
++    endif()
++  endforeach()
+ endif()
+diff --git a/src/s_tir/schedule/concrete_schedule.cc b/src/s_tir/schedule/concrete_schedule.cc
+index 2443d79..19c697e 100644
+--- a/src/s_tir/schedule/concrete_schedule.cc
++++ b/src/s_tir/schedule/concrete_schedule.cc
+@@ -218,7 +218,7 @@ Schedule ConcreteScheduleNode::Copy() {
+   }                                                                  \
+   catch (const ScheduleError& error) {                               \
+     if ((level) == ScheduleErrorRenderLevel::kDetail) {              \
+-      TVM_FFI_THROW(ScheduleError) << error.RenderReport(primitive); \
++      TVM_FFI_THROW(ScheduleError) << error.FastErrorString();       \
+     } else if ((level) == ScheduleErrorRenderLevel::kFast) {         \
+       TVM_FFI_THROW(ScheduleError) << error.FastErrorString();       \
+     } else if ((level) == ScheduleErrorRenderLevel::kNone) {         \
