@@ -1,11 +1,12 @@
-# Local LLM Android SDK
+# Mobile Local LLM with MLC
 
-在 Android App 内以接近云端 Chat API 的方式运行本地大模型。当前 MVP 使用
-[MLC LLM](https://github.com/mlc-ai/mlc-llm) + Android GPU，已在真实 arm64
-手机完成离线推理、流式输出、取消和连续 20 轮对话验证。
+面向 Android 与 iOS App 的通用端侧大模型运行方案，让上层以接近云端 Chat API
+的方式调用本地模型。底层采用 [MLC LLM](https://github.com/mlc-ai/mlc-llm)，
+公共契约不绑定模型、游戏类型或具体硬件后端。
 
-> 当前是 Android MVP，不是通用生产发行版。模型运行库需要在本地编译；模型
-> 权重不会提交到 Git。
+> 当前第一期仅实现 Android MVP，并已在真实 arm64 手机完成离线推理、流式输出、
+> 取消和连续 20 轮对话验证。iOS Metal 与双平台契约测试属于第二期，尚未实现。
+> 模型运行库需要在本地编译；模型权重不会提交到 Git。
 
 ## 能力
 
@@ -62,8 +63,8 @@ client.stream(
 - arm64-v8a Android 真机（Android 10+ 为产品建议下限）
 
 ```powershell
-git clone --recurse-submodules https://github.com/Hedlen/local-llm-android-mlc.git
-cd local-llm-android
+git clone --recurse-submodules https://github.com/Hedlen/mobile-local-llm-mlc.git
+cd mobile-local-llm-mlc
 powershell -ExecutionPolicy Bypass -File scripts/check-environment.ps1
 ```
 
