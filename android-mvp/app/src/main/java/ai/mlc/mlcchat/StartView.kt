@@ -75,6 +75,9 @@ fun StartView(
                 .padding(horizontal = 10.dp)
         ) {
             Text(text = "Model List", modifier = Modifier.padding(top = 10.dp))
+            TextButton(onClick = { navController.navigate("game") }) {
+                Text("打开棋局助手 MVP")
+            }
             LazyColumn() {
                 items(items = appViewModel.modelList,
                     key = { modelState -> modelState.id }
