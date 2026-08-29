@@ -49,14 +49,32 @@ client.stream(
 调用 `client.cancel()` 可中断当前生成；`reset()` 清除运行时会话状态，
 `unload()` 释放模型，宿主销毁时调用 `close()`。
 
+## 多模型管理
+
+`LocalLlmModelCatalog` 与 `LocalLlmModelManager` 负责模型安装、完整性验证、解析
+和删除，宿主只向推理 Client 传递已认证模型：
+
+```kotlin
+val catalog = LocalLlmModelCatalog.parse(catalogJson)
+val manager = LocalLlmModelManager(
+    rootDirectory = context.filesDir.resolve("local-llm-models"),
+    catalog = catalog,
+    expectedRuntimeRevision = runtimeRevision,
+)
+val installed = manager.install("local/qwen2.5-1.5b-instruct@1")
+client.load(installed)
+```
+
+catalog 中每个文件必须提供 HTTPS URL、长度和 SHA-256；校验成功前不会发布文件。
+完整制品流程见仓库根目录的 `docs/MODEL_CATALOG.md`。
+
 ## MVP 契约
 
-- 单模型、单并发生成；并发请求明确返回 `queue_full`。
+- 单次只加载一个模型、单并发生成；可以卸载或直接切换已安装模型。
 - 流式事件顺序：`Started → Delta* → Usage? → Completed`，取消终态为
   `Cancelled`。
 - 支持 system/user/assistant 文本消息、temperature、topP、seed、
   maxOutputTokens 和 stop。
 - 当前正式后端是 MLC GPU；`capabilities()` 不承诺 NPU。
-- 模型下载、哈希/签名和设备分档仍由 Model Manager 负责，不由推理 Client
-  隐式联网处理。
+- Model Manager 已提供下载和 SHA-256；catalog 签名与设备分档在后续阶段完成。
 - 多模态、记忆、JSON Schema、Tool Calling、云端回退和 iOS 不属于本期接口。

@@ -151,6 +151,53 @@ index f543027..f340b16 100644
                  shapes = [buffer.shape for buffer in buffers]
                  symbolic_vars = set(
                      expr for shape in shapes for expr in shape if isinstance(expr, tirx.Var)
+diff --git a/python/mlc_llm/support/download_cache.py b/python/mlc_llm/support/download_cache.py
+index fd262cb..656cd6c 100644
+--- a/python/mlc_llm/support/download_cache.py
++++ b/python/mlc_llm/support/download_cache.py
+@@ -11,6 +11,8 @@ from pathlib import Path
+ from typing import List, Optional, Tuple  # noqa: UP035
+ 
+ import requests
++from requests.adapters import HTTPAdapter
++from urllib3.util.retry import Retry
+ 
+ from . import logging, tqdm
+ from .constants import (
+@@ -105,7 +107,20 @@ def download_file(
+     md5sum: Optional[str],
+ ) -> Tuple[str, Path]:  # noqa: UP006
+     """Download a file from a URL to a destination file."""
+-    with requests.get(url, stream=True, timeout=30) as response:
++    session = requests.Session()
++    session.mount(
++        "https://",
++        HTTPAdapter(
++            max_retries=Retry(
++                total=5,
++                connect=5,
++                read=5,
++                backoff_factor=1.0,
++                status_forcelist=[429, 500, 502, 503, 504],
++            )
++        ),
++    )
++    with session.get(url, stream=True, timeout=(30, 120)) as response:
+         response.raise_for_status()
+         with destination.open("wb") as file:
+             for chunk in response.iter_content(chunk_size=8192):
+@@ -138,8 +153,9 @@ def download_and_cache_mlc_weights(
+     mlc_prefix = next(p for p in prefixes if model_url.startswith(p))
+     assert mlc_prefix
+ 
+-    git_url_template = "https://huggingface.co/{user}/{repo}"
+-    bin_url_template = "https://huggingface.co/{user}/{repo}/resolve/main/{record_name}"
++    hf_endpoint = os.getenv("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
++    git_url_template = hf_endpoint + "/{user}/{repo}"
++    bin_url_template = hf_endpoint + "/{user}/{repo}/resolve/main/{record_name}"
+ 
+     if model_url.count("/") != 1 + mlc_prefix.count("/") or not model_url.startswith(mlc_prefix):
+         raise ValueError(f"Invalid model URL: {model_url}")
 diff --git a/python/mlc_llm/interface/package.py b/python/mlc_llm/interface/package.py
 index 31909bd..391142a 100644
 --- a/python/mlc_llm/interface/package.py

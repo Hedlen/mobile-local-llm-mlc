@@ -17,6 +17,7 @@
 - 生成取消、会话重置、模型卸载
 - 公共 API 不暴露 MLC/TVM 类型
 - 已安装模型可在飞行模式下运行
+- 多模型 catalog、HTTPS 下载、逐文件 SHA-256、切换和删除
 
 ## SDK 调用
 
@@ -109,8 +110,8 @@ ARCHITECTURE.md             分层与依赖方向
 ```
 
 更多内容见 [SDK 接入指南](docs/INTEGRATION.md)、
-[真机验收报告](android-mvp/DEVICE_TEST_REPORT.md) 和
-[锁定版本](VERSIONS.md)。
+[真机验收报告](android-mvp/DEVICE_TEST_REPORT.md)、
+[多模型制品指南](docs/MODEL_CATALOG.md) 和 [锁定版本](VERSIONS.md)。
 
 ## 当前限制
 

@@ -9,24 +9,31 @@ python_bin="${MLC_PYTHON:?Set MLC_PYTHON to the Python 3.12 executable with mlc_
 ndk_root="${ANDROID_NDK:?Set ANDROID_NDK to Android NDK r27}"
 tvm_build="${TVM_BUILD:?Set TVM_BUILD to the TVM build directory}"
 model_url="HF://mlc-ai/Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
-local_model="${LOCAL_MODEL:?Set LOCAL_MODEL to the converted MLC model directory}"
-model_lib="${MODEL_LIB:?Set MODEL_LIB to the compiled Android model library archive}"
+local_model="${LOCAL_MODEL:-}"
+model_lib="${MODEL_LIB:-}"
 package_config="/tmp/android-mlc-package-config.json"
+requested_package_config="${PACKAGE_CONFIG:-}"
 
 test -x "$python_bin"
 test -x "$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
 test -f "$tvm_build/lib/libtvm_compiler.so"
-test -f "$local_model/mlc-chat-config.json"
-test -f "$model_lib"
+if [[ -z "$requested_package_config" ]]; then
+  : "${local_model:?Set LOCAL_MODEL or PACKAGE_CONFIG}"
+  : "${model_lib:?Set MODEL_LIB or PACKAGE_CONFIG}"
+  test -f "$local_model/mlc-chat-config.json"
+  test -f "$model_lib"
+else
+  test -f "$requested_package_config"
+fi
 
 apply_patch_once() {
   local source_dir="$1"
   local patch_file="$2"
-  if git -C "$source_dir" apply --reverse --check "$patch_file" >/dev/null 2>&1; then
+  if git -C "$source_dir" apply --reverse --check --ignore-space-change "$patch_file" >/dev/null 2>&1; then
     return
   fi
-  git -C "$source_dir" apply --check "$patch_file"
-  git -C "$source_dir" apply "$patch_file"
+  git -C "$source_dir" apply --check --ignore-space-change "$patch_file"
+  git -C "$source_dir" apply --ignore-space-change "$patch_file"
 }
 
 apply_patch_once "$mlc_source" "$repo_root/patches/mlc-llm-mvp.patch"
@@ -45,9 +52,13 @@ export PYTHONPATH="$mlc_source/3rdparty/tvm/python:$mlc_source/python"
 export SKIP_LOADING_MLCLLM_SO="1"
 export MLC_REMOTE_MODEL_URL="$model_url"
 
-sed -e "s#$model_url#$local_model#" \
-    -e "s#../.tooling/model-libs/qwen2.5-0.5b-q4f16_1-android.tar#$model_lib#" \
-    "$android_project/mlc-package-config.json" > "$package_config"
+if [[ -n "$requested_package_config" ]]; then
+  package_config="$requested_package_config"
+else
+  sed -e "s#$model_url#$local_model#" \
+      -e "s#../.tooling/model-libs/qwen2.5-0.5b-q4f16_1-android.tar#$model_lib#" \
+      "$android_project/mlc-package-config.json" > "$package_config"
+fi
 
 cd "$android_project"
 "$python_bin" -m mlc_llm package \

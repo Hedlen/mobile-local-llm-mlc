@@ -1,5 +1,8 @@
 # Android MVP 真机验收报告
 
+> 多模型补充（2026-08-29）：同一 Runtime 已成功加载并生成 Qwen2.5 0.5B、1.5B、
+> 3B q4f16_1；初步结果见 `docs/BENCHMARK_REPORT.md`。原一期稳定性结论仍针对 0.5B。
+
 - 日期：2026-08-29
 - 设备：PTP-AN00
 - 系统：Android 16 / API 36

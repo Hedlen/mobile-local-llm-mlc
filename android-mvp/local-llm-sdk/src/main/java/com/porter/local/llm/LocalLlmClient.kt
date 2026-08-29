@@ -50,6 +50,20 @@ class LocalLlmClient {
         }
     }
 
+    suspend fun load(installedModel: LocalLlmInstalledModel) {
+        if (installedModel.state != LocalLlmModelInstallState.INSTALLED) {
+            throw LocalLlmException(
+                "model_not_installed",
+                "${installedModel.manifest.id} is ${installedModel.state}",
+            )
+        }
+        load(
+            model = installedModel.manifest.id,
+            modelPath = installedModel.directory.absolutePath,
+            modelLib = installedModel.manifest.modelLib,
+        )
+    }
+
     fun stream(request: LocalLlmRequest): Flow<LocalLlmEvent> = flow {
         checkNotClosed()
         val activeModel = loadedModel
