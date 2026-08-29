@@ -13,6 +13,15 @@ dependencies {
 
 当前源码工程还需要生成的 `:mlc4j` 模块作为内部运行时依赖。
 
+使用 OpenCL/Vulkan 运行库的宿主 App 还必须在 `<application>` 中声明可选系统库：
+
+```xml
+<uses-native-library android:name="libOpenCL.so" android:required="false" />
+<uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
+```
+
+缺少声明时，部分 Android 11+ 设备会因 linker namespace 限制无法打开 OpenCL。
+
 ## 生命周期
 
 1. App 进程内创建一个 `LocalLlmClient`。

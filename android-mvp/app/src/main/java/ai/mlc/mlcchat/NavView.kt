@@ -15,6 +15,5 @@ fun NavView(activity: Activity, appViewModel: AppViewModel = viewModel()) {
     NavHost(navController = navController, startDestination = "home") {
         composable("home") { StartView(navController, appViewModel) }
         composable("chat") { ChatView(navController, appViewModel.chatState, activity) }
-        composable("game") { GameView(navController, appViewModel, activity) }
     }
 }

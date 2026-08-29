@@ -85,13 +85,14 @@ export MODEL_LIB=/path/to/qwen2.5-0.5b-q4f16_1-android.tar
 
 生成目录为 `android-mvp/dist/lib/mlc4j`。
 
-### 3. 构建与安装 Demo
+### 3. 构建 SDK 测试样例与五子棋 App
 
 ```powershell
 $env:JAVA_HOME='C:\Program Files\Eclipse Adoptium\jdk-17'
 cd android-mvp
-.\gradlew.bat :local-llm-sdk:testDebugUnitTest :app:assembleDebug
+.\gradlew.bat :local-llm-sdk:testDebugUnitTest :app:assembleDebug :gomoku-mvp:assembleDebug
 adb install -r app\build\outputs\apk\debug\app-debug.apk
+adb install -r gomoku-mvp\build\outputs\apk\debug\gomoku-mvp-debug.apk
 ```
 
 App 首次使用从配置地址下载约 265 MB 的量化权重；下载完成后可离线推理。
@@ -101,7 +102,8 @@ App 首次使用从配置地址下载约 265 MB 的量化权重；下载完成�
 
 ```text
 android-mvp/local-llm-sdk/  面向宿主 App 的 Kotlin SDK
-android-mvp/app/            Compose Demo 与模型下载 UI
+android-mvp/app/            仅用于验证 SDK/模型/Benchmark 的测试样例，不是产品 App
+android-mvp/gomoku-mvp/     基于通用 SDK 的首个独立产品 App（五子棋）
 android-mvp/mlc4j-source/   MLC Android adapter 源码快照
 scripts/                    环境检查和可复现打包脚本
 vendor/mlc-llm/             锁定的 MLC Git submodule
@@ -117,7 +119,7 @@ ARCHITECTURE.md             分层与依赖方向
 
 - MVP 仅 Android、arm64-v8a、单模型、单并发文本生成
 - 当前正式后端为 MLC GPU，不代表已使用各厂商 NPU
-- iOS、JSON Schema、记忆、Tool Calling、多模态和云端回退尚未实现
+- iOS、JSON Schema、Tool Calling、多模态和云端回退尚未实现
 - `capabilities()` 中的能力必须以认证设备和制品为准
 
 ## License

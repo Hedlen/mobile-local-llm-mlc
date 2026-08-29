@@ -17,3 +17,5 @@ __pycache__/
 !.env.example
 .DS_Store
 Thumbs.db
+android-mvp/.device-test-model/
+android-mvp/gomoku-*.png

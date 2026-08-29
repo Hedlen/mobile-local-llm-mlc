@@ -8,14 +8,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URL
+import java.net.HttpURLConnection
 
 class GomokuModelService(context: Context) {
-    private val root = File(context.getExternalFilesDir(null), "models/qwen2.5-0.5b-instruct")
+    private val root = File(context.filesDir, "models/qwen2.5-0.5b-instruct")
     private val base = "https://huggingface.co/mlc-ai/Qwen2.5-0.5B-Instruct-q4f16_1-MLC/resolve/main/"
     private val gson = Gson()
     val modelId = "local/qwen2.5-0.5b-instruct@1"
     val modelLib = "qwen2_q4f16_1_ec234c98ba1f1f6d014a60148428520a"
-    fun installed() = File(root, "mlc-chat-config.json").isFile && File(root, "tensor-cache.json").isFile
+    fun installed(): Boolean = runCatching {
+        val model = File(root, "mlc-chat-config.json"); val tensor = File(root, "tensor-cache.json")
+        if (!valid(model) || !valid(tensor)) return false
+        val config = gson.fromJson(model.readText(), ModelConfig::class.java)
+        val cache = gson.fromJson(tensor.readText(), CacheConfig::class.java)
+        config.tokenizerFiles.all { valid(File(root, it)) } && cache.records.all { valid(File(root, it.dataPath)) }
+    }.getOrDefault(false)
     suspend fun install(progress: (String) -> Unit) = withContext(Dispatchers.IO) {
         root.mkdirs(); fetch("mlc-chat-config.json", progress); fetch("tensor-cache.json", progress)
         val config = gson.fromJson(File(root, "mlc-chat-config.json").readText(), ModelConfig::class.java)
@@ -26,12 +33,21 @@ class GomokuModelService(context: Context) {
     }
     fun directory() = root
     private fun fetch(name: String, progress: (String) -> Unit) {
-        val target = File(root, name); if (target.isFile && target.length() > 0) return
+        require(!name.startsWith("/") && !name.contains(".."))
+        val target = File(root, name); if (valid(target)) return
         target.parentFile?.mkdirs(); val part = File(target.parentFile, target.name + ".part")
         progress("下载 $name")
-        URL(base + name).openStream().use { input -> part.outputStream().use { output -> input.copyTo(output) } }
-        check(part.renameTo(target)) { "无法保存 $name" }
+        val connection = URL(base + name).openConnection() as HttpURLConnection
+        connection.connectTimeout = 20_000; connection.readTimeout = 90_000; connection.instanceFollowRedirects = true
+        try {
+            check(connection.responseCode in 200..299) { "HTTP ${connection.responseCode}: $name" }
+            connection.inputStream.use { input -> part.outputStream().use { output -> input.copyTo(output) } }
+            check(valid(part)) { "下载文件为空: $name" }
+            if (target.exists()) target.delete()
+            check(part.renameTo(target)) { "无法保存 $name" }
+        } finally { connection.disconnect() }
     }
+    private fun valid(file: File) = file.isFile && file.length() > 0
     data class ModelConfig(@SerializedName("tokenizer_files") val tokenizerFiles: List<String>)
     data class CacheConfig(@SerializedName("records") val records: List<CacheRecord>)
     data class CacheRecord(@SerializedName("dataPath") val dataPath: String)
