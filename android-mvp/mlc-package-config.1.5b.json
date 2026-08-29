@@ -1,0 +1,14 @@
+{
+  "device": "android",
+  "model_list": [
+    {
+      "model": "HF://mlc-ai/Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "model_id": "local/qwen2.5-1.5b-instruct@1",
+      "estimated_vram_bytes": 2200000000,
+      "overrides": {
+        "prefill_chunk_size": 32,
+        "context_window_size": 1024
+      }
+    }
+  ]
+}

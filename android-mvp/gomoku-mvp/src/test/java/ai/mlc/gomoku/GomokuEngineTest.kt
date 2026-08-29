@@ -17,4 +17,10 @@ class GomokuEngineTest {
         repeat(4) { board[5 * 15 + it] = 2; board[8 * 15 + it] = 1 }
         assertEquals(5 * 15 + 4, GomokuEngine.chooseMove(board))
     }
+
+    @Test fun explainsImmediateThreatWithBoardFacts() {
+        val board = MutableList(GomokuEngine.SIZE * GomokuEngine.SIZE) { 0 }
+        repeat(4) { board[7 * 15 + it] = 2 }
+        assertTrue(GomokuEngine.moveInsight(board, 7 * 15 + 4, 1).contains("防住"))
+    }
 }

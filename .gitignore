@@ -19,3 +19,4 @@ __pycache__/
 Thumbs.db
 android-mvp/.device-test-model/
 android-mvp/gomoku-*.png
+android-mvp/window*.xml
