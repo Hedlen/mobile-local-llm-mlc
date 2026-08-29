@@ -520,6 +520,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private var modelLib = ""
         private var modelPath = ""
         private val executorService = Executors.newSingleThreadExecutor()
+        private val longTermMemory = LongTermMemoryStore(application)
         private val viewModelScope = CoroutineScope(Dispatchers.Main + Job())
         private var imageUri: Uri? = null
         private fun mainResetChat() {
@@ -719,6 +720,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             executorService.submit {
+                compactHistoryIfNeeded()
                 historyMessages.add(LocalLlmMessage(
                     role = LocalLlmRole.USER,
                     content = content,
@@ -776,6 +778,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     if (modelChatState.value == ModelChatState.Generating) switchToReady()
                 }
             }
+        }
+
+        /** Agent-style memory: summarize only stable facts, then keep a bounded short-term window. */
+        private fun compactHistoryIfNeeded() {
+            if (historyMessages.size < 10) return
+            val snapshot = historyMessages.takeLast(10).joinToString("\n") { "${it.role}: ${it.content}" }
+            val extraction = runCatching {
+                var text = ""
+                runBlocking {
+                    client.stream(LocalLlmRequest(
+                        model = modelName.value,
+                        messages = listOf(
+                            LocalLlmMessage(LocalLlmRole.SYSTEM, "Extract only durable user preferences, goals, skill level, recurring constraints, and important decisions. Ignore transient moves and small talk. Output at most 5 concise Markdown bullets; if none, output NONE."),
+                            LocalLlmMessage(LocalLlmRole.USER, "Existing long-term memory:\n${longTermMemory.read()}\n\nRecent conversation:\n$snapshot"),
+                        ), maxOutputTokens = 160, temperature = 0.1f,
+                    )).collect { event -> if (event is LocalLlmEvent.Delta) text += event.text }
+                }
+                text
+            }.getOrNull()
+            if (!extraction.isNullOrBlank() && !extraction.contains("NONE", ignoreCase = true)) longTermMemory.append(extraction)
+            val recent = historyMessages.takeLast(6)
+            historyMessages.clear()
+            val memory = longTermMemory.read()
+            if (memory.isNotBlank()) historyMessages.add(LocalLlmMessage(LocalLlmRole.SYSTEM, "Long-term user memory (use only when relevant):\n$memory"))
+            historyMessages.addAll(recent)
         }
 
         private fun appendMessage(role: MessageRole, text: String) {

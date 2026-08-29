@@ -1,7 +1,6 @@
 package ai.mlc.mlcchat
 
 import android.app.Activity
-import java.io.File
 import kotlin.math.roundToInt
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -28,13 +27,6 @@ fun GameView(navController: NavController, appViewModel: AppViewModel, activity:
     val moves = remember { mutableStateListOf<String>() }
     val model = appViewModel.modelList.firstOrNull { it.modelInitState.value == ModelInitState.Finished }
     val chat = appViewModel.chatState
-    val memoryFile = remember { File(activity.getExternalFilesDir(""), "gomoku-memory.md") }
-    var memory by remember { mutableStateOf(if (memoryFile.exists()) memoryFile.readText().takeLast(2400) else "") }
-    fun persistMemory(note: String) {
-        val entry = "- 玩家风格：$profile；本局：${moves.joinToString(",")}；$note\n"
-        memory = (memory + entry).takeLast(2400)
-        memoryFile.parentFile?.mkdirs(); memoryFile.writeText("# 五子棋助手记忆\n$memory")
-    }
     fun play(index: Int) {
         if (winner != 0 || board[index] != 0) return
         val next = board.toMutableList(); next[index] = 1; moves += "你:${index / N + 1},${index % N + 1}"
@@ -49,7 +41,7 @@ fun GameView(navController: NavController, appViewModel: AppViewModel, activity:
             item { GomokuBoard(board, Modifier.fillMaxWidth().aspectRatio(1f), ::play); TextButton(onClick = { board = List(N * N) { 0 }; moves.clear(); winner = 0 }) { Text("重新开始") } }
             item { OutlinedTextField(profile, { profile = it }, label = { Text("玩家风格/训练目标") }, modifier = Modifier.fillMaxWidth()) }
             item { Text(if (model == null) "未启用本地模型：请返回首页下载模型" else "模型档位：${model.modelConfig.modelId}（自动分级/降级）"); if (model != null && chat.modelName.value != model.modelConfig.modelId) Button({ model.startChat() }) { Text("启用本地模型") } }
-            item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(enabled = moves.isNotEmpty() && chat.chatable(), onClick = { persistMemory("请求当前局面下一步"); chat.requestGenerate("你是五子棋引擎教练。必须针对当前局面给出具体落点，不要泛泛而谈。棋盘坐标为行1-15、列1-15；黑=你，白=AI。当前棋谱：${moves.joinToString(",")}。请严格输出：推荐落点=行,列；落子颜色；直接威胁/防守理由（不超过30字）；一句鼓励。历史记忆（仅作风格参考）：$memory", activity) }) { Text("分析下一步") }; Button(enabled = moves.isNotEmpty() && chat.chatable(), onClick = { persistMemory("请求复盘"); chat.requestGenerate("根据五子棋当前棋谱‘${moves.joinToString(",")}’和玩家画像‘$profile’，写 80 字以内的具体复盘故事，指出一个关键落子坐标，并给两条可执行训练建议。历史记忆：$memory", activity) }) { Text("复盘讲故事") } } }
+            item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(enabled = moves.isNotEmpty() && chat.chatable(), onClick = { chat.requestGenerate("你是五子棋引擎教练。必须针对当前局面给出具体落点，不要泛泛而谈。棋盘坐标为行1-15、列1-15；黑=你，白=AI。当前棋谱：${moves.joinToString(",")}。请严格输出：推荐落点=行,列；落子颜色；直接威胁/防守理由（不超过30字）；一句鼓励。", activity) }) { Text("分析下一步") }; Button(enabled = moves.isNotEmpty() && chat.chatable(), onClick = { chat.requestGenerate("根据五子棋当前棋谱‘${moves.joinToString(",")}’和玩家画像‘$profile’，写 80 字以内的具体复盘故事，指出一个关键落子坐标，并给两条可执行训练建议。", activity) }) { Text("复盘讲故事") } } }
             item { val latest = chat.messages.lastOrNull { it.role == MessageRole.Assistant }?.text.orEmpty(); if (latest.isNotBlank() || chat.report.value.isNotBlank()) Card { Column(Modifier.padding(12.dp)) { Text("本地模型反馈", style = MaterialTheme.typography.titleMedium); Text(latest); Text(chat.report.value, style = MaterialTheme.typography.labelSmall) } } }
         }
     }
