@@ -19,4 +19,5 @@ rootProject.name = "MLCChat"
 include ':app'
 include ':mlc4j'
 include ':local-llm-sdk'
+include ':gomoku-mvp'
 project(':mlc4j').projectDir = file('dist/lib/mlc4j')
