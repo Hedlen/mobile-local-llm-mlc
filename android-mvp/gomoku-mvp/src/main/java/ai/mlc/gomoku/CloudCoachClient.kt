@@ -12,12 +12,12 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 class CloudCoachClient(private val context: Context, private val settings: CloudSettings) {
-    fun isOnline(): Boolean {
-        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return false
-        val network = manager.activeNetwork ?: return false
-        val capabilities = manager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-    }
+    fun isOnline(): Boolean = runCatching {
+        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return@runCatching false
+        val network = manager.activeNetwork ?: return@runCatching false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return@runCatching false
+        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }.getOrDefault(false)
 
     fun isConfigured(): Boolean = settings.load() != null
 
