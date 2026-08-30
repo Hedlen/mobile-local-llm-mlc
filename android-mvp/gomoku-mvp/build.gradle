@@ -1,9 +1,18 @@
 plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
 android { namespace 'ai.mlc.gomoku'; compileSdk 35
     defaultConfig { applicationId 'ai.mlc.gomoku'; minSdk 26; targetSdk 33; versionCode 1; versionName '1.0' }
-    buildFeatures { compose true }; composeOptions { kotlinCompilerExtensionVersion '1.4.3' }
+    buildFeatures { compose true; buildConfig true }; composeOptions { kotlinCompilerExtensionVersion '1.4.3' }
     compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
     kotlinOptions { jvmTarget = '1.8' }
+}
+def gomokuLocalProperties = new Properties()
+def gomokuLocalPropertiesFile = rootProject.file('local.properties')
+if (gomokuLocalPropertiesFile.exists()) gomokuLocalPropertiesFile.withInputStream { gomokuLocalProperties.load(it) }
+android.defaultConfig {
+    // Development only. Never put a long-lived provider key in a release APK.
+    buildConfigField 'String', 'ARK_API_KEY', '"' + (gomokuLocalProperties.getProperty('ARK_API_KEY', '').replace('"', '\\"')) + '"'
+    buildConfigField 'String', 'ARK_MODEL', '"deepseek-v4-flash-ga-260731"'
+    buildConfigField 'String', 'ARK_ENDPOINT', '"https://ark.cn-beijing.volces.com/api/v3/chat/completions"'
 }
 dependencies {
     implementation project(':local-llm-sdk'); implementation project(':mlc4j')
