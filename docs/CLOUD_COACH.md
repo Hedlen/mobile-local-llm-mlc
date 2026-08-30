@@ -1,26 +1,27 @@
-# 五子棋云端教练接入
+# Cloud AI in Gomoku
 
-五子棋的实时落子、胜负判断和推荐点始终在本地执行。点击“智能复盘”时，App 在有网且已配置令牌时优先调用云端 Chat Completions；网络、鉴权或服务异常时自动调用端侧 Qwen2.5 1.5B；端侧模型缺失时仍输出棋局算法复盘。
+The release app has no built-in provider key. A player can open **Settings** and
+enter a compatible HTTPS Chat Completions endpoint, model name, and their own
+API key. The key is encrypted with the Android Keystore and stored only on that
+device. It is never put in source control, the APK, logs, exports, or analytics.
 
-## 开发机调试
+## Runtime behavior
 
-撤销任何已泄露的 Provider Key 后，把新建的短期测试密钥放入**未提交**的 `android-mvp/local.properties`：
+- In **AI Match**, the local engine generates legal candidate moves and validates
+  the board. When cloud AI is configured and available, the model may choose only
+  from those candidates and write a short in-character reply.
+- Local move selection is immediate when cloud AI is unavailable, slow, invalid,
+  or not configured. Rules and win detection always remain local.
+- Review uses cloud AI first, then the downloaded on-device model, then a concise
+  deterministic review. A failed request never blocks a game.
 
-```properties
-ARK_API_KEY=replace-with-a-short-lived-development-key
-```
+## Release guidance
 
-重新构建 Debug APK。该值只用于本机调试；`local.properties` 已被 Git 忽略。不要分享包含该值编译出的 APK。
+User-provided keys are appropriate only for this early self-hosted release.
+Before operating a commercial service, replace direct provider access with a
+backend proxy or short-lived, scoped tokens. Send only the minimum board summary
+needed for the feature; do not upload account identifiers, device identifiers,
+contacts, or long-term-memory content.
 
-## 对外发布
-
-不要把 Ark 或任何模型服务商的长期密钥编译进 APK。对外版本应让 App 请求你的业务后端，由后端完成以下任一方式：
-
-- 代理 Chat Completions 请求；或
-- 校验登录态、设备额度和风控后签发短期、限额、限模型的令牌。
-
-服务端仅向模型服务商发送复盘所需的最小摘要：玩家等级/风格、棋局战术事实、落子数和赛果。不可上传账号标识、通讯录、设备标识或长期记忆原文。
-
-## 体验与降级
-
-云端连接超时为 6 秒，读取超时为 15 秒。失败不会阻塞对局；界面会显示实际通道：云端 AI、本地 1.5B 或棋局教练。
+If a key was ever pasted into a chat, source file, issue, screenshot, or build
+log, revoke it at the provider and create a replacement.

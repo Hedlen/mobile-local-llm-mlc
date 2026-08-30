@@ -11,7 +11,7 @@ import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
 
-class CloudCoachClient(private val context: Context) {
+class CloudCoachClient(private val context: Context, private val settings: CloudSettings) {
     fun isOnline(): Boolean {
         val manager = context.getSystemService(ConnectivityManager::class.java) ?: return false
         val network = manager.activeNetwork ?: return false
@@ -19,7 +19,7 @@ class CloudCoachClient(private val context: Context) {
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
-    fun isConfigured(): Boolean = BuildConfig.ARK_API_KEY.isNotBlank()
+    fun isConfigured(): Boolean = settings.load() != null
 
     suspend fun review(system: String, prompt: String): String = withContext(Dispatchers.IO) {
         post(system, prompt, 180, 0.7f)
@@ -42,9 +42,9 @@ class CloudCoachClient(private val context: Context) {
 
     private fun post(system: String, prompt: String, maxTokens: Int, temperature: Float): String {
         check(isOnline()) { "网络不可用" }
-        check(isConfigured()) { "云端令牌未配置" }
+        val config = checkNotNull(settings.load()) { "云端令牌未配置" }
         val payload = JsonObject().apply {
-            addProperty("model", BuildConfig.ARK_MODEL)
+            addProperty("model", config.model)
             add("messages", JsonArray().apply {
                 add(JsonObject().apply { addProperty("role", "system"); addProperty("content", system) })
                 add(JsonObject().apply { addProperty("role", "user"); addProperty("content", prompt) })
@@ -52,13 +52,13 @@ class CloudCoachClient(private val context: Context) {
             addProperty("temperature", temperature)
             addProperty("max_tokens", maxTokens)
         }.toString()
-        val connection = (URL(BuildConfig.ARK_ENDPOINT).openConnection() as HttpURLConnection).apply {
+        val connection = (URL(config.endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 6_000
             readTimeout = 15_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Authorization", "Bearer ${BuildConfig.ARK_API_KEY}")
+            setRequestProperty("Authorization", "Bearer ${config.apiKey}")
         }
         return try {
             connection.outputStream.bufferedWriter().use { it.write(payload) }
