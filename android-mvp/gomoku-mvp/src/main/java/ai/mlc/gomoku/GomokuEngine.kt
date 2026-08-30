@@ -9,11 +9,16 @@ object GomokuEngine {
         }
     }
     fun chooseMove(board: List<Int>, player: Int = 2): Int? {
+        return rankedMoves(board, player, 1).firstOrNull()
+    }
+    fun rankedMoves(board: List<Int>, player: Int = 2, limit: Int = 4): List<Int> {
         val opponent = if (player == 1) 2 else 1
         val empty = board.indices.filter { board[it] == 0 }
-        empty.firstOrNull { wins(board, it, player) }?.let { return it }
-        empty.firstOrNull { wins(board, it, opponent) }?.let { return it }
-        return empty.maxByOrNull { score(board, it, player) + score(board, it, opponent) * 0.9 - distance(it) * .04 }
+        val winning = empty.filter { wins(board, it, player) }
+        if (winning.isNotEmpty()) return winning.take(limit)
+        val blocking = empty.filter { wins(board, it, opponent) }
+        if (blocking.isNotEmpty()) return blocking.take(limit)
+        return empty.sortedByDescending { score(board, it, player) + score(board, it, opponent) * 0.9 - distance(it) * .04 }.take(limit)
     }
     fun moveInsight(board: List<Int>, index: Int, player: Int): String {
         val opponent = if (player == 1) 2 else 1

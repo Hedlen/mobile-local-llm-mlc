@@ -11,11 +11,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.porter.local.llm.*
 import kotlinx.coroutines.Dispatchers
@@ -23,9 +25,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 
 private const val N = GomokuEngine.SIZE
+private val Ink = Color(0xff25232A)
+private val Plum = Color(0xff6750A4)
+private val Wood = Color(0xffDCAF62)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(state: Bundle?) { super.onCreate(state); setContent { GomokuApp() } }
@@ -33,64 +39,123 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun GomokuApp() {
-    var board by remember { mutableStateOf(List(N * N) { 0 }) }; var winner by remember { mutableStateOf(0) }
-    var analyze by remember { mutableStateOf(true) }; var profile by remember { mutableStateOf("稳健学习型") }; var level by remember { mutableStateOf("进阶") }
-    var advice by remember { mutableStateOf("实时推荐由棋局引擎生成；联网时云端复盘优先，离线时自动使用本地模型。") }
-    var suggested by remember { mutableStateOf<Int?>(null) }; var reviewing by remember { mutableStateOf(false) }; var downloading by remember { mutableStateOf(false) }; var reviewJob by remember { mutableStateOf<Job?>(null) }
-    val context = LocalContext.current; val service = remember { GomokuModelService(context) }; val cloud = remember { CloudCoachClient(context) }; val scope = rememberCoroutineScope(); val client = remember { LocalLlmClient().apply { initialize() } }
-    var modelReady by remember { mutableStateOf(service.installed()) }; var status by remember { mutableStateOf(if (modelReady) "本地 Qwen2.5 1.5B 已就绪" else "下载 1.5B 后可使用本地复盘") }
-    DisposableEffect(Unit) { onDispose { client.cancel(); reviewJob?.cancel(); scope.launch { client.close() } } }
+    var board by remember { mutableStateOf(List(N * N) { 0 }) }
+    var winner by remember { mutableStateOf(0) }
+    var level by remember { mutableStateOf("进阶") }
+    var persona by remember { mutableStateOf("耐心教练") }
+    var suggested by remember { mutableStateOf<Int?>(null) }
+    var aiThinking by remember { mutableStateOf(false) }
+    var reviewing by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("我会认真和你下这一局。你先落子吧。") }
+    var moveCount by remember { mutableStateOf(0) }
+    var actionJob by remember { mutableStateOf<Job?>(null) }
+    val context = LocalContext.current
+    val service = remember { GomokuModelService(context) }
+    val cloud = remember { CloudCoachClient(context) }
+    val client = remember { LocalLlmClient().apply { initialize() } }
+    val scope = rememberCoroutineScope()
+    var localReady by remember { mutableStateOf(service.installed()) }
+    var downloading by remember { mutableStateOf(false) }
 
-    fun updateSuggestion(position: List<Int>) {
-        if (!analyze || winner != 0) return
+    DisposableEffect(Unit) { onDispose { client.cancel(); actionJob?.cancel(); scope.launch { client.close() } } }
+    val cloudAvailable = cloud.isOnline() && cloud.isConfigured()
+
+    fun coordinate(index: Int) = "${index / N + 1},${index % N + 1}"
+    fun localMove(candidates: List<Int>): Int = when (level) {
+        "初学" -> candidates.getOrElse(2) { candidates.last() }
+        "高手" -> candidates.first()
+        else -> candidates.getOrElse(1) { candidates.first() }
+    }
+    fun localReply(insight: String) = when (persona) {
+        "热血对手" -> "这一步很有冲劲。$insight"
+        "安静棋友" -> "我看见了这个连接点。$insight"
+        else -> "这一手值得肯定。$insight"
+    }
+    fun refreshSuggestion(position: List<Int>) {
+        if (winner != 0) { suggested = null; return }
         suggested = GomokuEngine.chooseMove(position, 1)
-        val point = suggested ?: return
-        advice = "推荐落点：${point / N + 1},${point % N + 1}（棋盘红点）\n${GomokuEngine.moveInsight(position, point, 1)}\n$level·$profile：稳住节奏，这一手是在为后续主动权铺路。"
+    }
+    fun finishGame(result: Int) {
+        winner = result; suggested = null
+        message = when (result) {
+            1 -> "漂亮的五连！这一局的关键，是你始终保住了自己的连接。"
+            2 -> "这局我抓住了关键机会。想不想一起复盘，看看下一局怎样反制？"
+            else -> "棋盘已满，和棋也说明你守住了局面。"
+        }
     }
     fun play(index: Int) {
-        if (winner != 0 || board[index] != 0) return
-        val next = board.toMutableList(); next[index] = 1
-        if (GomokuEngine.hasFive(next, index, 1)) { board = next; winner = 1; suggested = null; advice = "五连！你赢了。现在可以用本地 AI 复盘总结这一局。"; return }
-        val ai = GomokuEngine.chooseMove(next)
-        if (ai != null) { next[ai] = 2; if (GomokuEngine.hasFive(next, ai, 2)) winner = 2 } else winner = 3
-        board = next
-        if (winner != 0) { suggested = null; advice = if (winner == 2) "AI 五连获胜。现在可以用本地 AI 复盘找出关键转折。" else "和棋。现在可以用本地 AI 复盘总结这一局。" } else updateSuggestion(next)
+        if (aiThinking || winner != 0 || board[index] != 0) return
+        val next = board.toMutableList(); next[index] = 1; board = next; moveCount += 1
+        if (GomokuEngine.hasFive(next, index, 1)) { finishGame(1); return }
+        val candidates = GomokuEngine.rankedMoves(next, 2)
+        if (candidates.isEmpty()) { finishGame(3); return }
+        aiThinking = true; message = if (cloudAvailable) "$persona 正在构思这一手…" else "$persona 正在思考…"
+        val fact = GomokuEngine.moveInsight(next, candidates.first(), 2)
+        actionJob = scope.launch {
+            val cloudDecision = withContext(Dispatchers.Default) {
+                if (!cloudAvailable) null else withTimeoutOrNull(3_500) {
+                    runCatching { cloud.chooseOpponentMove(persona, level, candidates.map(::coordinate), fact) }.getOrNull()
+                }
+            }
+            val ai = cloudDecision?.coordinate?.let { wanted -> candidates.firstOrNull { coordinate(it) == wanted } } ?: localMove(candidates)
+            next[ai] = 2; board = next; moveCount += 1
+            if (GomokuEngine.hasFive(next, ai, 2)) finishGame(2)
+            else {
+                refreshSuggestion(next)
+                message = cloudDecision?.reply?.takeIf { it.isNotBlank() } ?: localReply(GomokuEngine.moveInsight(next, ai, 2))
+            }
+            aiThinking = false
+        }
     }
     fun review() {
         if (reviewing) return
-        val position = board; val point = GomokuEngine.chooseMove(position, 1)
-        val insight = point?.let { GomokuEngine.moveInsight(position, it, 1) } ?: "棋局已结束，重点回看最后几手的攻防取舍。"
-        val moveCount = position.count { it != 0 }; val capturedWinner = winner; val capturedProfile = "$level·$profile"
-        val system = "你是温暖、专业的五子棋复盘教练。只依据给定局面事实，写三段以内的简短复盘：本局亮点、一个可训练点、下一局可执行建议。不得虚构坐标、胜负或棋形。"
-        val prompt = "玩家等级与风格：$capturedProfile；已落子数：$moveCount；局面事实：$insight；赛果：${resultName(capturedWinner)}。"
-        reviewing = true; advice = if (cloud.isOnline() && cloud.isConfigured()) "云端 AI 正在生成个性化复盘；网络异常会自动转本地模型。" else "本地 Qwen2.5 1.5B 正在复盘；棋盘仍可继续操作。"
-        reviewJob = scope.launch {
-            val result = withContext(Dispatchers.Default) {
-                val cloudReview = if (cloud.isOnline() && cloud.isConfigured()) runCatching { cloud.review(system, prompt) }.getOrNull() else null
-                if (cloudReview != null) "云端 AI 复盘\n" + GameReview.finish(cloudReview, capturedProfile, moveCount, insight, capturedWinner)
-                else if (modelReady) runCatching {
-                    if (client.state != LocalLlmClientState.READY) client.load(service.modelId, service.directory().absolutePath, service.modelLib)
-                    var output = ""
-                    client.stream(LocalLlmRequest(service.modelId, listOf(LocalLlmMessage(LocalLlmRole.SYSTEM, system), LocalLlmMessage(LocalLlmRole.USER, prompt)), maxOutputTokens = 40, temperature = 0.65f, topP = 0.9f)).collect { event -> if (event is LocalLlmEvent.Delta) output += event.text }
-                    "本地 AI 复盘\n" + GameReview.finish(output, capturedProfile, moveCount, insight, capturedWinner)
-                }.getOrElse { "棋局教练\n" + GameReview.fallback(capturedProfile, moveCount, insight, capturedWinner) }
-                else "棋局教练\n" + GameReview.fallback(capturedProfile, moveCount, insight, capturedWinner)
+        val snapshot = board; val count = snapshot.count { it != 0 }
+        val insight = GomokuEngine.chooseMove(snapshot, 1)?.let { GomokuEngine.moveInsight(snapshot, it, 1) } ?: "本局结束后重点回看最后几手的攻防取舍。"
+        val profile = "$level·$persona"; val result = resultName(winner)
+        val system = "你是温暖、专业的五子棋教练。只依据事实写三段以内复盘：亮点、一个训练点、下一局建议。不得编造坐标、胜负或棋形。"
+        val prompt = "玩家档位与偏好：$profile；已落子数：$count；局面事实：$insight；赛果：$result。"
+        reviewing = true; message = if (cloudAvailable) "正在生成你的专属赛后信…" else "离线棋友正在整理本局复盘…"
+        actionJob = scope.launch {
+            val text = withContext(Dispatchers.Default) {
+                val online = if (cloudAvailable) runCatching { cloud.review(system, prompt) }.getOrNull() else null
+                when {
+                    online != null -> "云端复盘\n" + GameReview.finish(online, profile, count, insight, winner)
+                    localReady -> runCatching {
+                        if (client.state != LocalLlmClientState.READY) client.load(service.modelId, service.directory().absolutePath, service.modelLib)
+                        var out = ""; client.stream(LocalLlmRequest(service.modelId, listOf(LocalLlmMessage(LocalLlmRole.SYSTEM, system), LocalLlmMessage(LocalLlmRole.USER, prompt)), maxOutputTokens = 40, temperature = .65f)).collect { if (it is LocalLlmEvent.Delta) out += it.text }
+                        "离线复盘\n" + GameReview.finish(out, profile, count, insight, winner)
+                    }.getOrElse { "棋局回信\n" + GameReview.fallback(profile, count, insight, winner) }
+                    else -> "棋局回信\n" + GameReview.fallback(profile, count, insight, winner)
+                }
             }
-            advice = result; reviewing = false
+            message = text; reviewing = false
         }
     }
-    Scaffold(topBar = { TopAppBar(title = { Text("五子棋 · 本地 AI 助手") }) }) { padding -> Column(Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text(if (winner == 0) "你执黑 · AI 执白" else "对局结束"); Row { Text("实时建议"); Switch(analyze, { analyze = it }) } }
-        Canvas(Modifier.fillMaxWidth().aspectRatio(1f).background(Color(0xffd9a85b)).pointerInput(board) { detectTapGestures { tap -> val cell = size.width / (N - 1); val col = (tap.x / cell).roundToInt().coerceIn(0, N - 1); val row = (tap.y / cell).roundToInt().coerceIn(0, N - 1); play(row * N + col) } }) { val cell = size.width / (N - 1); for (line in 0 until N) { drawLine(Color(0xff5b3a1f), Offset(0f, line * cell), Offset(size.width, line * cell)); drawLine(Color(0xff5b3a1f), Offset(line * cell, 0f), Offset(line * cell, size.width)) }; board.forEachIndexed { index, piece -> if (piece > 0) drawCircle(if (piece == 1) Color(0xff202124) else Color.White, cell * .38f, Offset((index % N) * cell, (index / N) * cell)) }; suggested?.let { drawCircle(Color(0x99e53935), cell * .24f, Offset((it % N) * cell, (it / N) * cell)) } }
-        OutlinedTextField(profile, { profile = it }, label = { Text("玩家风格") }, modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("初学", "进阶", "高手").forEach { choice -> Button(onClick = { level = choice }, enabled = level != choice) { Text(choice) } } }
-        Text(status); Text(if (cloud.isOnline() && cloud.isConfigured()) "AI 通道：云端优先，端侧兜底" else "AI 通道：端侧优先（云端令牌未配置或网络不可用）")
-        if (!modelReady) Button(onClick = { scope.launch { downloading = true; status = "下载 1.5B 模型中…"; runCatching { service.install { status = it }; modelReady = true; status = "本地 Qwen2.5 1.5B 已就绪" }.onFailure { status = "下载失败：${it.message}" }; downloading = false } }, enabled = !downloading, modifier = Modifier.fillMaxWidth()) { Text(if (downloading) "1.5B 下载中…" else "下载 Qwen2.5 1.5B（约 870 MB）") }
-        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) { Text("AI 局面分析", style = MaterialTheme.typography.titleMedium); Text(advice) } }
-        Button(onClick = ::review, enabled = !reviewing && (modelReady || (cloud.isOnline() && cloud.isConfigured())), modifier = Modifier.fillMaxWidth()) { Text(if (reviewing) "AI 复盘中…" else "智能复盘（云端优先 / 本地兜底）") }
-        Button(onClick = { client.cancel(); reviewJob?.cancel(); reviewing = false; board = List(N * N) { 0 }; winner = 0; suggested = null; advice = "新棋局已开始。你执黑先行；实时棋局不会占用大模型。" }, modifier = Modifier.fillMaxWidth()) { Text("重新开始") }
-        Text("实时落子由棋局搜索引擎完成；1.5B 仅在你主动复盘时后台运行，以控制卡顿、功耗和温度。")
-    } }
+    fun restart() {
+        client.cancel(); actionJob?.cancel(); board = List(N * N) { 0 }; winner = 0; suggested = null; aiThinking = false; reviewing = false; moveCount = 0
+        message = "$persona 已就位。新的一局，慢慢来。"
+    }
+
+    Scaffold(containerColor = Color(0xffFBF8FF), topBar = { TopAppBar(title = { Column { Text("棋友", fontWeight = FontWeight.Bold); Text(if (cloudAvailable) "云端 AI 对局 · 离线可继续" else "本地 AI 对局 · 随时可玩", style = MaterialTheme.typography.labelSmall) } }) }) { padding ->
+        Column(Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xffEEE8F8)), modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Column { Text("$persona · $level", fontWeight = FontWeight.SemiBold); Text(if (aiThinking) "AI 正在思考" else if (winner == 0) "轮到 ${if (moveCount % 2 == 0) "你" else "AI"}" else "对局已结束", style = MaterialTheme.typography.bodySmall) }
+                Text(if (cloudAvailable) "云端增强" else "离线可用", color = Plum, style = MaterialTheme.typography.labelLarge)
+            } }
+            Canvas(Modifier.fillMaxWidth().aspectRatio(1f).background(Wood).pointerInput(board, aiThinking) { detectTapGestures { tap -> val cell = size.width / (N - 1); play((tap.y / cell).roundToInt().coerceIn(0, N - 1) * N + (tap.x / cell).roundToInt().coerceIn(0, N - 1)) } }) {
+                val cell = size.width / (N - 1)
+                for (line in 0 until N) { drawLine(Color(0xff77512A), Offset(0f, line * cell), Offset(size.width, line * cell), strokeWidth = 1.5f); drawLine(Color(0xff77512A), Offset(line * cell, 0f), Offset(line * cell, size.width), strokeWidth = 1.5f) }
+                board.forEachIndexed { index, piece -> if (piece > 0) drawCircle(if (piece == 1) Ink else Color(0xffFAFAFA), cell * .38f, Offset((index % N) * cell, (index / N) * cell)) }
+                suggested?.let { drawCircle(Color(0x99E85D3F), cell * .22f, Offset((it % N) * cell, (it / N) * cell)) }
+            }
+            Card(modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) { Text(if (reviewing) "AI 正在写给你…" else persona, color = Plum, style = MaterialTheme.typography.labelLarge); Spacer(Modifier.height(4.dp)); Text(message) } }
+            Text("选择对局风格", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("初学", "进阶", "高手").forEach { value -> OutlinedButton(onClick = { level = value }, enabled = level != value, modifier = Modifier.weight(1f)) { Text(value) } } }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("耐心教练", "热血对手", "安静棋友").forEach { value -> OutlinedButton(onClick = { persona = value }, enabled = persona != value, modifier = Modifier.weight(1f)) { Text(value, maxLines = 1) } } }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) { Button(onClick = ::review, enabled = !reviewing, modifier = Modifier.weight(1f)) { Text("复盘") }; OutlinedButton(onClick = ::restart, modifier = Modifier.weight(1f)) { Text("新对局") } }
+            if (!localReady) OutlinedButton(onClick = { scope.launch { downloading = true; runCatching { service.install {}; localReady = true }.onFailure { message = "离线棋友暂不可用，但你仍可继续与本地棋局 AI 对弈。" }; downloading = false } }, enabled = !downloading, modifier = Modifier.fillMaxWidth()) { Text(if (downloading) "准备离线棋友…" else "下载离线棋友") }
+        }
+    }
 }
 
 private fun resultName(winner: Int) = when (winner) { 1 -> "玩家胜"; 2 -> "AI 胜"; 3 -> "和棋"; else -> "进行中" }

@@ -22,6 +22,25 @@ class CloudCoachClient(private val context: Context) {
     fun isConfigured(): Boolean = BuildConfig.ARK_API_KEY.isNotBlank()
 
     suspend fun review(system: String, prompt: String): String = withContext(Dispatchers.IO) {
+        post(system, prompt, 180, 0.7f)
+    }
+
+    suspend fun chooseOpponentMove(persona: String, level: String, candidates: List<String>, fact: String): CloudMoveDecision? {
+        val response = post(
+            system = "你是五子棋 AI 对手。只能从用户给出的合法候选坐标中选一个。输出严格 JSON：{\"move\":\"行,列\",\"reply\":\"不超过28字的中文对手回应\"}。不得添加 Markdown 或额外文字。",
+            prompt = "对手人格：$persona；难度：$level；局面事实：$fact；合法候选：${candidates.joinToString("、")}。",
+            maxTokens = 80,
+            temperature = 0.55f,
+        )
+        val json = response.substringAfter('{', "").substringBeforeLast('}', "")
+        if (json.isBlank()) return null
+        return runCatching {
+            val objectValue = JsonParser.parseString("{$json}").asJsonObject
+            CloudMoveDecision(objectValue.get("move").asString, objectValue.get("reply").asString.take(40))
+        }.getOrNull()
+    }
+
+    private fun post(system: String, prompt: String, maxTokens: Int, temperature: Float): String {
         check(isOnline()) { "网络不可用" }
         check(isConfigured()) { "云端令牌未配置" }
         val payload = JsonObject().apply {
@@ -30,8 +49,8 @@ class CloudCoachClient(private val context: Context) {
                 add(JsonObject().apply { addProperty("role", "system"); addProperty("content", system) })
                 add(JsonObject().apply { addProperty("role", "user"); addProperty("content", prompt) })
             })
-            addProperty("temperature", 0.7)
-            addProperty("max_tokens", 180)
+            addProperty("temperature", temperature)
+            addProperty("max_tokens", maxTokens)
         }.toString()
         val connection = (URL(BuildConfig.ARK_ENDPOINT).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -41,7 +60,7 @@ class CloudCoachClient(private val context: Context) {
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer ${BuildConfig.ARK_API_KEY}")
         }
-        try {
+        return try {
             connection.outputStream.bufferedWriter().use { it.write(payload) }
             val body = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader()?.use { it.readText() }.orEmpty()
@@ -55,3 +74,5 @@ class CloudCoachClient(private val context: Context) {
         }
     }
 }
+
+data class CloudMoveDecision(val coordinate: String, val reply: String)
