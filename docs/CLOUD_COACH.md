@@ -25,3 +25,7 @@ contacts, or long-term-memory content.
 
 If a key was ever pasted into a chat, source file, issue, screenshot, or build
 log, revoke it at the provider and create a replacement.
+
+The current Chinese product labels this as **云端 AI** in Settings. It is
+optional: without it, local move selection and the offline-review fallback stay
+available.

@@ -25,7 +25,7 @@ class CloudCoachClient(private val context: Context, private val settings: Cloud
         post(system, prompt, 180, 0.7f)
     }
 
-    suspend fun chooseOpponentMove(persona: String, level: String, candidates: List<String>, fact: String): CloudMoveDecision? {
+    suspend fun chooseOpponentMove(persona: String, level: String, candidates: List<String>, fact: String): CloudMoveDecision? = withContext(Dispatchers.IO) {
         val response = post(
             system = "你是五子棋 AI 对手。只能从用户给出的合法候选坐标中选一个。输出严格 JSON：{\"move\":\"行,列\",\"reply\":\"不超过28字的中文对手回应\"}。不得添加 Markdown 或额外文字。",
             prompt = "对手人格：$persona；难度：$level；局面事实：$fact；合法候选：${candidates.joinToString("、")}。",
@@ -33,8 +33,7 @@ class CloudCoachClient(private val context: Context, private val settings: Cloud
             temperature = 0.55f,
         )
         val json = response.substringAfter('{', "").substringBeforeLast('}', "")
-        if (json.isBlank()) return null
-        return runCatching {
+        if (json.isBlank()) null else runCatching {
             val objectValue = JsonParser.parseString("{$json}").asJsonObject
             CloudMoveDecision(objectValue.get("move").asString, objectValue.get("reply").asString.take(40))
         }.getOrNull()
